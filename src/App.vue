@@ -35,18 +35,25 @@
 <script>
 import positionApi from "@/api/position.js";
 import store from "@/store/index.js";
+import SockJS from "sockjs-client";
+import Stomp from "stompjs";
+import URLConfig from "@/config/URLConfig.js";
 export default {
   data() {
     return {
       isFixed: false,
-      offsetTop: 0
+      offsetTop: 0,
+      content: "",
+      isConnect: false,
+      stompClient: null,
+      URL: URLConfig
     };
   },
   methods: {
     initHistogramAndLineData() {
       //查看Vuex中是否有这条数据，如果没有就重新请求，如果有就不用了
       let _data = store.getters.getHistogramAndLineData;
-      console.log(_data);
+      // console.log(_data);
       if (_data.counts === undefined || _data.counts.length === 0) {
         positionApi.getHistogramAndLineData().then(res => {
           console.log(res);
@@ -65,10 +72,56 @@ export default {
       } else {
         this.isFixed = false;
       }
+    },
+    connect() {
+      console.log("connect");
+      const socket = new SockJS(this.URL.connectUrl); //连接上端点(基站)
+      const stompClient = Stomp.over(socket);
+      this.stompClient = stompClient;
+      //连接->发送消息->找订阅点
+      stompClient.connect({}, () => {
+        this.isConnect = true;
+        stompClient.subscribe(this.URL.subscribeUrl, result => {
+          console.log(result.body)
+          this.content = JSON.parse(result.body).content;
+          this.$notify({
+            title: "tip!",
+            offset: 68,
+            message: this.content
+          });
+        });
+      });
+      console.log(socket);
+      console.log(this.isConnect);
+      console.log(this.stompClient);
+    },
+    sendMessage() {
+      console.log("sendMessage");
+      this.stompClient.send(
+        this.URL.sendUrl,
+        {},
+        JSON.stringify({ hello: "hello" })
+      );
+    },
+    disconnect() {
+      if (this.stompClient !== null) {
+        this.stompClient.disconnect();
+      }
+      this.isConnect = false;
+    }
+  },
+  watch: {
+    isConnect(newVal, oldVal) {
+      // console.log(this);
+      // console.log(newVal)
+      if (newVal === true) {
+        this.sendMessage();
+      }
     }
   },
   created() {
     this.initHistogramAndLineData();
+    this.connect();
   },
   mounted() {
     // 设置bar浮动阈值为 #fixedBar 至页面顶部的距离
@@ -77,6 +130,7 @@ export default {
     window.addEventListener("scroll", this.handleScroll);
   },
   destroyed() {
+    this.disconnect();
     // 离开页面 关闭监听 不然会报错
     window.removeEventListener("scroll", this.handleScroll);
   }
@@ -94,7 +148,7 @@ export default {
   color: rgb(33, 204, 216);
 }
 .el-icon-pie-chart:hover {
-  color:rgb(99, 83, 34);
+  color: rgb(99, 83, 34);
 }
 .el-icon-s-data:hover {
   color: rgb(71, 32, 243);
